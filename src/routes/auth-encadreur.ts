@@ -148,6 +148,15 @@ router.post('/add', authenticateToken, requireRole(['encadreur', 'doc']), async 
     const validatedData = addStudentSchema.parse(req.body);
     const encadreur = (req as any).user;
 
+    // Normalize encadreur identity: support payloads with `id` or `userId`.
+    const encadreurId = encadreur?.userId ?? encadreur?.id ?? null;
+    const schoolId = encadreur?.school_id ?? encadreur?.schoolId ?? encadreur?.school ?? null;
+
+    if (!encadreurId) {
+      console.warn('[auth-encadreur] add student missing encadreur id on req.user', encadreur);
+      return res.status(401).json({ success: false, error: 'Unauthorized - encadreur id missing' });
+    }
+
     // Générer un token unique pour cet étudiant
     const joinToken = crypto.randomBytes(16).toString('hex');
 
@@ -158,8 +167,8 @@ router.post('/add', authenticateToken, requireRole(['encadreur', 'doc']), async 
       ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, join_token, email, first_name, last_name, created_at`,
       [
-        encadreur.school_id,
-        encadreur.userId,
+        schoolId,
+        encadreurId,
         validatedData.email,
         validatedData.first_name,
         validatedData.last_name,
@@ -174,7 +183,7 @@ router.post('/add', authenticateToken, requireRole(['encadreur', 'doc']), async 
     console.log(`📧 Student link sent to ${validatedData.email}: ${joinUrl}`);
 
     // Notifier l'encadreur et l'admin
-    socketEmitter.notifyUser(encadreur.userId, 'student:added', { studentLink });
+    socketEmitter.notifyUser(encadreurId, 'student:added', { studentLink });
     socketEmitter.notifyRole('admin', 'student:invited', { studentLink });
 
     res.status(201).json({
@@ -249,33 +258,45 @@ router.post('/join/:token', async (req, res) => {
       });
     }
 
-    // Vérifier si l'email existe déjà
-    const existingStudent = await queryOne(
-      `SELECT id FROM students WHERE email = $1 AND school_id = $2`,
+    // Vérifier si l'email existe déjà dans users pour cette école
+    const existingUser = await queryOne(
+      `SELECT id FROM users WHERE email = $1 AND school_id = $2`,
       [studentLink.email, studentLink.school_id]
     );
 
-    if (existingStudent) {
+    if (existingUser) {
       return res.status(400).json({ success: false, error: 'Student email already registered' });
     }
 
     // Hasher le mot de passe
     const passwordHash = await bcrypt.hash(validatedData.password, 10);
 
-    // Créer le profil étudiant
-    const student = await queryOne(
-      `INSERT INTO students (
-        school_id, encadreur_id, email, first_name, last_name, password_hash
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, email, first_name, last_name, school_id`,
+    // Créer l'utilisateur (profil) dans la table users
+    const newUser = await queryOne(
+      `INSERT INTO users (school_id, email, password_hash, role, first_name, last_name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, school_id, email, first_name, last_name`,
       [
         studentLink.school_id,
-        studentLink.encadreur_id,
         studentLink.email,
+        passwordHash,
+        'student',
         studentLink.first_name,
         studentLink.last_name,
-        passwordHash,
       ]
+    );
+
+    if (!newUser) {
+      throw new Error('Failed to create user for student');
+    }
+
+    // Générer un student_number et créer la ligne students (référence à user_id)
+    const studentNumber = `STU-${Date.now()}`;
+    const student = await queryOne(
+      `INSERT INTO students (user_id, school_id, student_number, status)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, user_id, student_number, school_id`,
+      [newUser.id, studentLink.school_id, studentNumber, 'active']
     );
 
     // Marquer le lien comme utilisé
@@ -285,12 +306,13 @@ router.post('/join/:token', async (req, res) => {
       [student.id, studentLink.id]
     );
 
-    // Créer JWT token pour l'étudiant
+    // Créer JWT token pour l'étudiant (inclut userId et studentId)
     const jwtToken = jwt.sign(
       {
+        userId: newUser.id,
         studentId: student.id,
-        school_id: student.school_id,
-        email: student.email,
+        school_id: newUser.school_id,
+        email: newUser.email,
         role: 'student',
       },
       process.env.JWT_SECRET || 'your-secret-key',

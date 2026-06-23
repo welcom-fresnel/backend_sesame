@@ -4,10 +4,16 @@ import { config } from '../config/index.js';
 let pool: Pool;
 
 export function initializePool(): Pool {
+  const connStr = config.database.url || '';
+  // Mask password when logging
+  const masked = connStr.replace(/:(?:[^:@]+)@/, ':****@');
+  console.log('Using DATABASE_URL:', masked);
+
   pool = new Pool({
-    connectionString: config.database.url,
+    connectionString: connStr,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    // Increase the connection timeout to allow for slower startups or transient network hiccups
+    connectionTimeoutMillis: 10000,
   });
 
   pool.on('error', (err) => {
@@ -59,14 +65,32 @@ export async function queryOne<T>(
 
 // Test connection
 export async function testConnection(): Promise<boolean> {
-  try {
-    const client = await getClient();
-    await client.query('SELECT NOW()');
-    client.release();
-    console.log('✅ Database connection successful');
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    return false;
+  const maxRetries = 5;
+  const baseDelay = 1000; // ms
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const client = await getClient();
+      await client.query('SELECT NOW()');
+      client.release();
+      console.log('✅ Database connection successful');
+      return true;
+    } catch (error) {
+      const cause = (error as any).cause ?? error;
+      console.error(
+        `❌ Database connection attempt ${attempt}/${maxRetries} failed:`,
+        cause
+      );
+
+      if (attempt < maxRetries) {
+        const delay = baseDelay * attempt;
+        console.log(`Retrying in ${delay}ms...`);
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((res) => setTimeout(res, delay));
+      }
+    }
   }
+
+  console.error('❌ All database connection attempts failed');
+  return false;
 }

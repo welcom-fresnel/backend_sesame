@@ -17,7 +17,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: config.cors.origin,
+    // In dev accept any origin to simplify local frontend testing
+    origin: config.isDev ? '*' : config.cors.origin,
     credentials: true,
   },
 });
@@ -31,20 +32,31 @@ app.use(
       // Allow non-browser clients (curl, server-to-server)
       if (!origin) return callback(null, true);
 
+      // In development, allow all origins to reduce friction with various frontends
+      if (config.isDev) return callback(null, true);
+
       const allowed = config.cors.origin;
       if (Array.isArray(allowed) && allowed.includes(origin)) return callback(null, true);
-
-      if (
-        config.isDev &&
-        /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
-      ) {
-        return callback(null, true);
-      }
 
       return callback(new Error('Not allowed by CORS'));
     },
   })
 );
+
+// Simple request logger (dev)
+if (config.isDev) {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      const origin = req.headers.origin ?? '-';
+      console.log(
+        `[http] ${res.statusCode} ${req.method} ${req.originalUrl} ${ms}ms origin=${origin}`
+      );
+    });
+    next();
+  });
+}
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

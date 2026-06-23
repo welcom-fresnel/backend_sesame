@@ -1,27 +1,47 @@
 import { z } from 'zod';
 
+function normalizeEmailDomain(input: unknown): unknown {
+  if (typeof input !== 'string') return input;
+  const value = input.trim().toLowerCase();
+  if (!value) return value;
+  // Allow users to paste an email (ex: "john@university.fr") and extract the domain.
+  if (value.includes('@')) {
+    const parts = value.split('@');
+    return parts[parts.length - 1] ?? value;
+  }
+  return value;
+}
+
 // Schémas pour les écoles
 export const schoolSchema = z.object({
   name: z.string().min(2, 'School name required'),
   city: z.string().optional(),
   country: z.string().optional(),
   // Domain only (ex: "university.fr"), not an email address.
-  email_domain: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{2,})+$/, 'Invalid email domain')
-    .optional(),
+  email_domain: z.preprocess(
+    normalizeEmailDomain,
+    z
+      .string()
+      .regex(
+        /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{2,})+$/,
+        'Invalid email domain (ex: university.fr)'
+      )
+      .optional()
+  ),
   logo_url: z.string().url().optional(),
   description: z.string().optional(),
 });
 
 export const createSchoolSchema = schoolSchema.extend({
-  email_domain: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{2,})+$/, 'Invalid email domain'),
+  email_domain: z.preprocess(
+    normalizeEmailDomain,
+    z
+      .string()
+      .regex(
+        /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{2,})+$/,
+        'Invalid email domain (ex: university.fr)'
+      )
+  ),
 });
 
 export type School = z.infer<typeof schoolSchema>;

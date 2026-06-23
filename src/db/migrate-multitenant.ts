@@ -27,8 +27,45 @@ CREATE INDEX IF NOT EXISTS idx_schools_active ON schools(is_active);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id UUID REFERENCES schools(id) ON DELETE CASCADE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(6);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);
+-- password_hash must be nullable for 2-step encadreur registration (register → verify email → set password)
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- Extend user roles to support multi-tenant encadreurs/docs
+DO $$
+DECLARE
+  c_name text;
+BEGIN
+  SELECT conname INTO c_name
+  FROM pg_constraint
+  WHERE conrelid = 'users'::regclass
+    AND contype = 'c'
+    AND pg_get_constraintdef(oid) ILIKE '%role%IN%';
+
+  IF c_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', c_name);
+  END IF;
+
+  ALTER TABLE users
+    ADD CONSTRAINT users_role_check
+    CHECK (role IN ('student','professor','admin','encadreur','doc'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 DO $$
 BEGIN
+  -- Drop constraint if it exists
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'unique_user_per_school'
+  ) THEN
+    ALTER TABLE users DROP CONSTRAINT unique_user_per_school;
+  END IF;
+  
+  -- Drop any global unique constraint on email so the new per-school uniqueness can be applied
+  ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+
+  -- Create the constraint to enforce uniqueness per school
   ALTER TABLE users ADD CONSTRAINT unique_user_per_school UNIQUE (school_id, email);
 EXCEPTION
   WHEN duplicate_object THEN NULL;
@@ -40,9 +77,39 @@ CREATE INDEX IF NOT EXISTS idx_users_verified ON users(verified);
 ALTER TABLE professors ADD COLUMN IF NOT EXISTS school_id UUID REFERENCES schools(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_professors_school_id ON professors(school_id);
 
+-- Ensure a professor can belong to multiple schools by making uniqueness scoped to (school_id, user_id)
+DO $$
+BEGIN
+  -- Drop existing unique constraint on user_id if present
+  ALTER TABLE professors DROP CONSTRAINT IF EXISTS professors_user_id_key;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE professors ADD CONSTRAINT unique_professor_per_school UNIQUE (school_id, user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Modification de la table students (si elle existe)
 ALTER TABLE students ADD COLUMN IF NOT EXISTS school_id UUID REFERENCES schools(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_students_school_id ON students(school_id);
+
+-- Ensure a student can belong to multiple schools by scoping uniqueness to (school_id, user_id)
+DO $$
+BEGIN
+  -- Drop existing unique constraint on user_id if present
+  ALTER TABLE students DROP CONSTRAINT IF EXISTS students_user_id_key;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE students ADD CONSTRAINT unique_student_per_school UNIQUE (school_id, user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Nouvelle table: Student Join Links (pour l'invitation des étudiants)
 CREATE TABLE IF NOT EXISTS student_join_links (

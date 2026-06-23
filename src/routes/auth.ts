@@ -14,11 +14,13 @@ const registerSchema = z.object({
   first_name: z.string().min(2),
   last_name: z.string().min(2),
   role: z.enum(['student', 'professor', 'admin']),
+  school_id: z.string().uuid().optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
+  school_id: z.string().uuid().optional(),
 });
 
 // Register
@@ -26,16 +28,21 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   try {
     const validatedData = registerSchema.parse(req.body);
 
-    // Check if user already exists
-    const existingUser = await queryOne<User>(
-      'SELECT * FROM users WHERE email = $1',
-      [validatedData.email]
-    );
+    // Check if user already exists (if school_id provided, check per-school)
+    let existingUser: User | null = null;
+    if (validatedData.school_id) {
+      existingUser = await queryOne<User>(
+        'SELECT * FROM users WHERE email = $1 AND school_id = $2',
+        [validatedData.email, validatedData.school_id]
+      );
+    } else {
+      existingUser = await queryOne<User>('SELECT * FROM users WHERE email = $1', [validatedData.email]);
+    }
 
     if (existingUser) {
       res.status(400).json({
         success: false,
-        error: 'Email already registered',
+        error: validatedData.school_id ? 'Email already registered in this school' : 'Email already registered',
       });
       return;
     }
@@ -43,19 +50,36 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Hash password
     const password_hash = await hashPassword(validatedData.password);
 
-    // Create user
-    const newUser = await queryOne<User>(
-      `INSERT INTO users (email, password_hash, role, first_name, last_name)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, email, role, first_name, last_name, avatar_url, created_at, updated_at`,
-      [
-        validatedData.email,
-        password_hash,
-        validatedData.role,
-        validatedData.first_name,
-        validatedData.last_name,
-      ]
-    );
+    // Create user (include school_id when provided)
+    let newUser: User | null = null;
+    if (validatedData.school_id) {
+      newUser = await queryOne<User>(
+        `INSERT INTO users (school_id, email, password_hash, role, first_name, last_name)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, school_id, email, role, first_name, last_name, avatar_url, created_at, updated_at`,
+        [
+          validatedData.school_id,
+          validatedData.email,
+          password_hash,
+          validatedData.role,
+          validatedData.first_name,
+          validatedData.last_name,
+        ]
+      );
+    } else {
+      newUser = await queryOne<User>(
+        `INSERT INTO users (email, password_hash, role, first_name, last_name)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, email, role, first_name, last_name, avatar_url, created_at, updated_at`,
+        [
+          validatedData.email,
+          password_hash,
+          validatedData.role,
+          validatedData.first_name,
+          validatedData.last_name,
+        ]
+      );
+    }
 
     if (!newUser) {
       res.status(500).json({
@@ -68,22 +92,39 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Create role-specific record
     if (validatedData.role === 'student') {
       const studentNumber = `STU-${Date.now()}`;
-      await query(
-        'INSERT INTO students (user_id, student_number, status) VALUES ($1, $2, $3)',
-        [newUser.id, studentNumber, 'active']
-      );
+      if (validatedData.school_id) {
+        await query(
+          'INSERT INTO students (user_id, school_id, student_number, status) VALUES ($1, $2, $3, $4)',
+          [newUser.id, validatedData.school_id, studentNumber, 'active']
+        );
+      } else {
+        await query('INSERT INTO students (user_id, student_number, status) VALUES ($1, $2, $3)', [
+          newUser.id,
+          studentNumber,
+          'active',
+        ]);
+      }
     } else if (validatedData.role === 'professor') {
-      await query('INSERT INTO professors (user_id, max_students) VALUES ($1, $2)', [
-        newUser.id,
-        30,
-      ]);
+      if (validatedData.school_id) {
+        await query('INSERT INTO professors (user_id, school_id, max_students) VALUES ($1, $2, $3)', [
+          newUser.id,
+          validatedData.school_id,
+          30,
+        ]);
+      } else {
+        await query('INSERT INTO professors (user_id, max_students) VALUES ($1, $2)', [
+          newUser.id,
+          30,
+        ]);
+      }
     }
 
-    // Generate tokens
+    // Generate tokens (include school_id when present)
     const tokens = generateTokenPair({
       id: newUser.id,
       email: newUser.email,
       role: newUser.role,
+      school_id: (newUser as any).school_id,
     });
 
     const userResponse: UserResponse = {
@@ -128,10 +169,19 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     const validatedData = loginSchema.parse(req.body);
 
     // Find user
-    const user = await queryOne<User>(
-      'SELECT * FROM users WHERE email = $1',
-      [validatedData.email]
-    );
+    let user: User | null = null;
+    if (validatedData.school_id) {
+      user = await queryOne<User>('SELECT * FROM users WHERE email = $1 AND school_id = $2', [
+        validatedData.email,
+        validatedData.school_id,
+      ]);
+    } else {
+      // If multiple accounts exist for the same email (multi-tenant), prefer a verified account
+      user = await queryOne<User>(
+        'SELECT * FROM users WHERE email = $1 ORDER BY verified DESC LIMIT 1',
+        [validatedData.email]
+      );
+    }
 
     if (!user) {
       res.status(401).json({
@@ -155,11 +205,12 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Generate tokens
+    // Generate tokens (include school_id when present)
     const tokens = generateTokenPair({
       id: user.id,
       email: user.email,
       role: user.role,
+      school_id: (user as any).school_id,
     });
 
     const userResponse: UserResponse = {

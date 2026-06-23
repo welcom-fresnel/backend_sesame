@@ -5,24 +5,46 @@ import type { Student, User } from '../types/index.js';
 
 const router = Router();
 
-// Get all students (admin only)
+// Get all students (admin: all, encadreur/doc: filtered by school_id)
 router.get(
   '/',
   authMiddleware,
-  requireRole('admin'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const students = await query<Student & { user: User }>(
-        `SELECT s.*, u.email, u.first_name, u.last_name, u.avatar_url
-         FROM students s
-         JOIN users u ON s.user_id = u.id
-         ORDER BY s.created_at DESC`
-      );
+      const role = req.user?.role;
 
-      res.json({
-        success: true,
-        data: students,
-      });
+      if (role === 'admin') {
+        // Admin voit tous les étudiants
+        const students = await query<Student & { user: User }>(
+          `SELECT s.*, u.email, u.first_name, u.last_name, u.avatar_url
+           FROM students s
+           JOIN users u ON s.user_id = u.id
+           ORDER BY s.created_at DESC`
+        );
+        res.json({ success: true, data: students });
+        return;
+      }
+
+      if (role === 'encadreur' || role === 'doc') {
+        // Encadreur/doc voient uniquement les étudiants de leur école
+        const schoolId = (req.user as any)?.school_id;
+        if (!schoolId) {
+          res.status(403).json({ success: false, error: 'No school assigned' });
+          return;
+        }
+        const students = await query<Student & { user: User }>(
+          `SELECT s.*, u.email, u.first_name, u.last_name, u.avatar_url
+           FROM students s
+           JOIN users u ON s.user_id = u.id
+           WHERE s.school_id = $1
+           ORDER BY s.created_at DESC`,
+          [schoolId]
+        );
+        res.json({ success: true, data: students });
+        return;
+      }
+
+      res.status(403).json({ success: false, error: 'Forbidden' });
     } catch (error) {
       console.error('Get students error:', error);
       res.status(500).json({
@@ -57,12 +79,21 @@ router.get(
         return;
       }
 
-      // Check permissions: can only view if admin, professor of student, or self
-      if (
-        req.user?.role !== 'admin' &&
-        req.user?.id !== student.user_id &&
-        req.user?.id !== student.professor_id
-      ) {
+      // Check permissions:
+      // - admin can view any student
+      // - a user can view their own student profile (user_id)
+      // - the professor assigned to the student (professor_id) can view
+      // - encadreur/doc roles can view students that belong to their school
+      const user = req.user as any;
+      if (user?.role === 'admin') {
+        // allowed
+      } else if (user?.id === student.user_id) {
+        // student viewing own profile
+      } else if (user?.id === student.professor_id) {
+        // assigned professor
+      } else if ((user?.role === 'encadreur' || user?.role === 'doc') && user?.school_id && user.school_id === student.school_id) {
+        // encadreur/doc can view students in their school
+      } else {
         res.status(403).json({
           success: false,
           error: 'Forbidden',

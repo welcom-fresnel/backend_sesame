@@ -23,6 +23,7 @@ const seedDatabase = async () => {
     const professor = await queryOne(
       `INSERT INTO users (email, password_hash, first_name, last_name, role)
        VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
        RETURNING id, email`,
       ['prof.martin@university.fr', professorPassword, 'Martin', 'Dupont', 'professor']
     );
@@ -31,6 +32,7 @@ const seedDatabase = async () => {
     const professorProfile = await queryOne(
       `INSERT INTO professors (user_id, title, department, email)
        VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id) DO UPDATE SET title = EXCLUDED.title, department = EXCLUDED.department, email = EXCLUDED.email
        RETURNING id, user_id`,
       [professor.id, 'Professeur Agrégé', 'Informatique', 'prof.martin@university.fr']
     );
@@ -43,6 +45,7 @@ const seedDatabase = async () => {
       const student = await queryOne(
         `INSERT INTO users (email, password_hash, first_name, last_name, role)
          VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
          RETURNING id, email`,
         [
           `student${i}@university.fr`,
@@ -56,6 +59,7 @@ const seedDatabase = async () => {
       const studentProfile = await queryOne(
         `INSERT INTO students (user_id, student_number, enrollment_year)
          VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET student_number = EXCLUDED.student_number, enrollment_year = EXCLUDED.enrollment_year
          RETURNING id, user_id`,
         [student.id, `STU${String(i).padStart(5, '0')}`, 2024]
       );
@@ -73,6 +77,7 @@ const seedDatabase = async () => {
     const admin = await queryOne(
       `INSERT INTO users (email, password_hash, first_name, last_name, role)
        VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
        RETURNING id, email`,
       ['admin@university.fr', adminPassword, 'Admin', 'System', 'admin']
     );
