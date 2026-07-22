@@ -150,3 +150,21 @@ src/
 ## 📞 Support
 
 Pour toute question, ouvrir une issue sur le repository.
+
+## 🛠️ Modifications récentes (résumé des travaux)
+
+Ces notes listent les changements appliqués pendant la session de développement actuelle :
+
+- Correction de la variable `DATABASE_URL` dans `backend/.env` (suppression d'un point-virgule final) pour rétablir la connexion DB.
+- Ajout de mécanismes de retry / diagnostics dans l'initialisation de la connexion PG.
+- Migration multi-tenant : création de la table `schools`, introduction de `school_id` sur `users`, `professors`, `students`, et contrainte unique `(school_id, email)` pour les `users`.
+- Création de la table `student_join_links` pour gérer les invitations et tokens d'inscription.
+- Rendre les seeds idempotents (`ON CONFLICT`) pour éviter les échecs lors des ré-exécutions.
+- Normalisation du payload JWT et du middleware `auth` pour supporter `id`, `userId`, `studentId` de façon cohérente.
+- Correction du flux d'invitation/join :
+  - `POST /api/auth/encadreur/add` insère correctement les `student_join_links` avec `school_id` et `encadreur_id` normalisés.
+  - `POST /api/students/join/:token` : correction du handler pour créer d'abord une ligne dans `users` (email + password_hash + role='student'), puis créer la ligne `students` référencée par `user_id`, et marquer le lien comme utilisé.
+- Mise à jour des routes `students` pour exposer `GET /api/students` et `GET /api/students/:studentId` incluant les champs utilisateurs (email, first_name, last_name) et autorisations multi-tenant (admin, professeur assigné, encadreur/doc de la même école).
+- Fix divers problèmes de permissions (403/401) et erreurs SQL (colonne inexistante) liés à l'évolution du schéma.
+
+Si vous voulez une entrée CHANGELOG plus détaillée (commits, fichiers modifiés, diff), je peux générer un fichier `CHANGELOG.md` séparé avec la liste complète.

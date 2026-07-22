@@ -105,7 +105,7 @@ export function requireRole(...roles: Array<string | string[]>) {
 
 export function optionalAuth(
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ): void {
   try {

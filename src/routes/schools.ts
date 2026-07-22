@@ -7,7 +7,7 @@ import { socketEmitter } from '../index.js';
 const router = express.Router();
 
 // GET /api/schools - Liste toutes les écoles (publique)
-router.get('/', async (req, res) => {
+router.get('/', async (_req, res) => {
   try {
     const schools = await query(`
       SELECT id, name, city, country, email_domain, logo_url, description
@@ -16,10 +16,10 @@ router.get('/', async (req, res) => {
       ORDER BY name ASC
     `);
 
-    res.json({ success: true, data: schools });
+    return res.json({ success: true, data: schools });
   } catch (error) {
     console.error('Error fetching schools:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch schools' });
+    return res.status(500).json({ success: false, error: 'Failed to fetch schools' });
   }
 });
 
@@ -41,10 +41,10 @@ router.get('/:id', async (req, res) => {
       SELECT * FROM school_stats WHERE id = $1
     `, [id]);
     
-    res.json({ success: true, data: { ...school, stats } });
+    return res.status(200).json({ success: true, data: { ...school, stats } });
   } catch (error) {
     console.error('Error fetching school:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch school' });
+    return res.status(500).json({ success: false, error: 'Failed to fetch school' });
   }
 });
 
@@ -74,18 +74,20 @@ router.post('/', authenticateToken, requireRole(['admin']), async (req, res) => 
       validatedData.logo_url || null,
       validatedData.description || null
     ]);
+
+    if (!school) {
+      return res.status(500).json({ success: false, error: 'Failed to create school' });
+    }
     
-    // Notifier les administrateurs
     socketEmitter.notifyRole('admin', 'school:created', { school });
     
-    res.status(201).json({ success: true, data: school });
+    return res.status(201).json({ success: true, data: school });
   } catch (error) {
     console.error('Error creating school:', error);
     if (error instanceof Error && error.message.includes('validation')) {
-      res.status(400).json({ success: false, error: error.message });
-    } else {
-      res.status(500).json({ success: false, error: 'Failed to create school' });
+      return res.status(400).json({ success: false, error: error.message });
     }
+    return res.status(500).json({ success: false, error: 'Failed to create school' });
   }
 });
 
@@ -129,10 +131,10 @@ router.put('/:id', authenticateToken, requireRole(['admin']), async (req, res) =
     
     socketEmitter.notifyRole('admin', 'school:updated', { school: updatedSchool });
     
-    res.json({ success: true, data: updatedSchool });
+    return res.status(200).json({ success: true, data: updatedSchool });
   } catch (error) {
     console.error('Error updating school:', error);
-    res.status(500).json({ success: false, error: 'Failed to update school' });
+    return res.status(500).json({ success: false, error: 'Failed to update school' });
   }
 });
 
@@ -155,10 +157,10 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
     
     socketEmitter.notifyRole('admin', 'school:deleted', { school: deletedSchool });
     
-    res.json({ success: true, data: deletedSchool, message: 'School deleted successfully' });
+    return res.status(200).json({ success: true, data: deletedSchool, message: 'School deleted successfully' });
   } catch (error) {
     console.error('Error deleting school:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete school' });
+    return res.status(500).json({ success: false, error: 'Failed to delete school' });
   }
 });
 
@@ -181,10 +183,10 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, error: 'School not found' });
     }
     
-    res.json({ success: true, data: stats });
+    return res.status(200).json({ success: true, data: stats });
   } catch (error) {
     console.error('Error fetching school stats:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch stats' });
+    return res.status(500).json({ success: false, error: 'Failed to fetch stats' });
   }
 });
 

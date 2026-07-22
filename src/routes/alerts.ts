@@ -11,7 +11,7 @@ router.get(
   '/',
   authMiddleware,
   requireRole('admin'),
-  async (req: Request, res: Response): Promise<void> => {
+  async (_req: Request, res: Response): Promise<void> => {
     try {
       const alerts = await query<Alert>(
         `SELECT * FROM alerts ORDER BY created_at DESC`

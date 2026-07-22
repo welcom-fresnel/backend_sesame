@@ -1,6 +1,7 @@
 // User types
 export interface User {
   id: string;
+  student_id?: string;
   school_id?: string;
   email: string;
   password_hash: string;
@@ -21,6 +22,8 @@ export interface JWTPayload {
   userId?: string;
   studentId?: string;
   school_id?: string;
+  first_name?: string;
+  last_name?: string;
   email: string;
   role: 'student' | 'professor' | 'admin' | 'encadreur' | 'doc';
 }
@@ -90,6 +93,32 @@ export interface JournalEntry {
   submitted: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface DefenseProposal {
+  id: string;
+  project_id: string;
+  student_title: string;
+  proposed_date: Date;
+  rationale?: string;
+  status: 'pending' | 'validated' | 'rescheduled' | 'rejected';
+  supervisor_comment?: string;
+  supervisor_proposed_date?: Date;
+  submitted_at: Date;
+  reviewed_at?: Date;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface FileRecord {
+  id: string;
+  project_id?: string;
+  user_id?: string;
+  file_name: string;
+  file_url: string;
+  mime_type?: string;
+  file_size?: number;
+  uploaded_at: Date;
 }
 
 // Alert types

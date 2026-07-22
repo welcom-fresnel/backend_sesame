@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from '../db/index.js';
+import { authMiddleware } from '../middleware/auth.js';
 import { hashPassword, comparePasswords } from '../utils/password.js';
 import { generateTokenPair } from '../utils/jwt.js';
 import type { User, UserResponse } from '../types/index.js';
@@ -122,13 +123,17 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Generate tokens (include school_id when present)
     const tokens = generateTokenPair({
       id: newUser.id,
+      userId: newUser.id,
       email: newUser.email,
       role: newUser.role,
       school_id: (newUser as any).school_id,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
     });
 
     const userResponse: UserResponse = {
       id: newUser.id,
+      school_id: (newUser as any).school_id,
       email: newUser.email,
       role: newUser.role,
       first_name: newUser.first_name,
@@ -143,6 +148,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
       data: {
         user: userResponse,
         tokens,
+        token: tokens.accessToken,
       },
     });
   } catch (error) {
@@ -183,7 +189,15 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       );
     }
 
-    if (!user) {
+    if (!user || !user.password_hash) {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid credentials',
+      });
+      return;
+    }
+
+    if (user.verified === false && user.role !== 'student') {
       res.status(401).json({
         success: false,
         error: 'Invalid credentials',
@@ -208,13 +222,17 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     // Generate tokens (include school_id when present)
     const tokens = generateTokenPair({
       id: user.id,
+      userId: user.id,
       email: user.email,
       role: user.role,
       school_id: (user as any).school_id,
+      first_name: user.first_name,
+      last_name: user.last_name,
     });
 
     const userResponse: UserResponse = {
       id: user.id,
+      school_id: (user as any).school_id,
       email: user.email,
       role: user.role,
       first_name: user.first_name,
@@ -229,6 +247,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       data: {
         user: userResponse,
         tokens,
+        token: tokens.accessToken,
       },
     });
   } catch (error) {
@@ -250,7 +269,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 // Get current user
-router.get('/me', async (req: Request, res: Response): Promise<void> => {
+router.get('/me', authMiddleware, async (req: Request, res: Response): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({
@@ -260,8 +279,12 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const user = await queryOne<User>(
-      'SELECT id, email, role, first_name, last_name, avatar_url, created_at, updated_at FROM users WHERE id = $1',
+    const user = await queryOne<User & { student_id?: string; school_id?: string }>(
+      `SELECT u.id, u.school_id, u.email, u.role, u.first_name, u.last_name, u.avatar_url,
+              u.created_at, u.updated_at, s.id AS student_id
+       FROM users u
+       LEFT JOIN students s ON s.user_id = u.id
+       WHERE u.id = $1`,
       [req.user.id]
     );
 
@@ -275,6 +298,8 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
 
     const userResponse: UserResponse = {
       id: user.id,
+      school_id: user.school_id,
+      student_id: user.student_id,
       email: user.email,
       role: user.role,
       first_name: user.first_name,

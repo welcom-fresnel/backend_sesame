@@ -1,4 +1,4 @@
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, QueryResultRow } from 'pg';
 import { config } from '../config/index.js';
 
 let pool: Pool;
@@ -41,7 +41,7 @@ export async function getClient(): Promise<PoolClient> {
 }
 
 // Helper function to run queries
-export async function query<T>(
+export async function query<T extends QueryResultRow>(
   text: string,
   params?: unknown[]
 ): Promise<T[]> {
@@ -55,7 +55,7 @@ export async function query<T>(
 }
 
 // Helper function to run a single row query
-export async function queryOne<T>(
+export async function queryOne<T extends QueryResultRow>(
   text: string,
   params?: unknown[]
 ): Promise<T | null> {

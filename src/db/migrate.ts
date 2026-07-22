@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Defense proposals table
+CREATE TABLE IF NOT EXISTS defense_proposals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  student_title VARCHAR(255) NOT NULL,
+  proposed_date DATE NOT NULL,
+  rationale TEXT,
+  status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'validated', 'rescheduled', 'rejected')),
+  supervisor_comment TEXT,
+  supervisor_proposed_date DATE,
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Alerts table
 CREATE TABLE IF NOT EXISTS alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -127,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_students_professor_id ON students(professor_id);
 CREATE INDEX IF NOT EXISTS idx_professors_user_id ON professors(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_student_id ON projects(student_id);
 CREATE INDEX IF NOT EXISTS idx_journal_entries_project_id ON journal_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_defense_proposals_project_id ON defense_proposals(project_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_professor_id ON alerts(professor_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_student_id ON alerts(student_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);

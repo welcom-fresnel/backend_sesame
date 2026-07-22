@@ -1,6 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import jwt from 'jsonwebtoken';
-import { config } from '../config/index.js';
+import { verifyToken } from '../utils/jwt.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -19,10 +18,10 @@ export function setupSocketHandlers(io: SocketIOServer) {
     }
 
     try {
-      const decoded = jwt.verify(token as string, config.jwt.secret) as any;
-      socket.userId = decoded.userId;
-      socket.studentId = decoded.studentId;
-      socket.school_id = decoded.school_id;
+      const decoded = verifyToken(token as string) as any;
+      socket.userId = decoded.userId ?? decoded.id;
+      socket.studentId = decoded.studentId ?? decoded.id;
+      socket.school_id = decoded.school_id ?? decoded.schoolId ?? decoded.school;
       socket.userRole = decoded.role;
       next();
     } catch (error) {

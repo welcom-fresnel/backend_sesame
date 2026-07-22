@@ -1,4 +1,4 @@
-import { initializePool, getPool, closePool, queryOne, query } from './index.js';
+import { initializePool, closePool, queryOne } from './index.js';
 import { pathToFileURL } from 'url';
 
 const seedSchools = async () => {
@@ -60,6 +60,11 @@ const seedSchools = async () => {
            RETURNING id, name, email_domain`,
           [school.name, school.city, school.country, school.email_domain, school.description]
         );
+
+        if (!createdSchool) {
+          console.warn(`⚠️ Failed to create school for ${school.email_domain}`);
+          continue;
+        }
 
         console.log(`✅ School created: ${createdSchool.name} (${createdSchool.email_domain})`);
       } else {

@@ -123,9 +123,9 @@ router.get(
     try {
       const { studentId } = req.params;
 
-      // Verify student exists
-      const student = await queryOne<Student>(
-        'SELECT id FROM students WHERE id = $1',
+      // Verify student exists and gather permissions fields
+      const student = await queryOne<Student & { professor_id?: string; school_id?: string; user_id: string }>(
+        'SELECT id, user_id, professor_id, school_id FROM students WHERE id = $1',
         [studentId]
       );
 
@@ -133,6 +133,23 @@ router.get(
         res.status(404).json({
           success: false,
           error: 'Student not found',
+        });
+        return;
+      }
+
+      const user = req.user as any;
+      const isAdmin = user?.role === 'admin';
+      const isOwner = user?.id === student.user_id;
+      const isProfessor = user?.id === student.professor_id;
+      const isSchoolEncadreur =
+        (user?.role === 'encadreur' || user?.role === 'doc') &&
+        user?.school_id &&
+        user.school_id === student.school_id;
+
+      if (!isAdmin && !isOwner && !isProfessor && !isSchoolEncadreur) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
         });
         return;
       }

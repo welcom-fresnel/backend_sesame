@@ -1,4 +1,4 @@
-import { query, queryOne, initializePool, testConnection } from './index.js';
+import { queryOne, initializePool, testConnection } from './index.js';
 import bcryptjs from 'bcryptjs';
 
 const seedDatabase = async () => {
@@ -28,6 +28,10 @@ const seedDatabase = async () => {
       ['prof.martin@university.fr', professorPassword, 'Martin', 'Dupont', 'professor']
     );
 
+    if (!professor) {
+      throw new Error('Failed to create professor user');
+    }
+
     // Create professor profile
     const professorProfile = await queryOne(
       `INSERT INTO professors (user_id, title, department, email)
@@ -36,6 +40,10 @@ const seedDatabase = async () => {
        RETURNING id, user_id`,
       [professor.id, 'Professeur Agrégé', 'Informatique', 'prof.martin@university.fr']
     );
+
+    if (!professorProfile) {
+      throw new Error('Failed to create professor profile');
+    }
 
     console.log('✅ Professor created:', professor.email);
 
@@ -56,6 +64,10 @@ const seedDatabase = async () => {
         ]
       );
 
+      if (!student) {
+        throw new Error(`Failed to create student ${i}`);
+      }
+
       const studentProfile = await queryOne(
         `INSERT INTO students (user_id, student_number, enrollment_year)
          VALUES ($1, $2, $3)
@@ -64,8 +76,11 @@ const seedDatabase = async () => {
         [student.id, `STU${String(i).padStart(5, '0')}`, 2024]
       );
 
+      if (!studentProfile) {
+        throw new Error(`Failed to create student profile for ${student.email}`);
+      }
+
       students.push({
-        userId: student.id,
         studentId: studentProfile.id,
         email: student.email,
       });
@@ -81,6 +96,10 @@ const seedDatabase = async () => {
        RETURNING id, email`,
       ['admin@university.fr', adminPassword, 'Admin', 'System', 'admin']
     );
+
+    if (!admin) {
+      throw new Error('Failed to create admin user');
+    }
 
     console.log('✅ Admin created:', admin.email);
 
@@ -102,6 +121,10 @@ const seedDatabase = async () => {
         ]
       );
 
+      if (!project) {
+        throw new Error(`Failed to create project for ${student.email}`);
+      }
+
       projects.push({
         projectId: project.id,
         studentId: student.studentId,
@@ -114,7 +137,7 @@ const seedDatabase = async () => {
     // Create journal entries
     for (const project of projects) {
       for (let i = 1; i <= 2; i++) {
-        const entry = await queryOne(
+        await queryOne(
           `INSERT INTO journal_entries (project_id, content, entry_date, sentiment, submitted)
            VALUES ($1, $2, $3, $4, $5)
            RETURNING id`,
@@ -133,7 +156,7 @@ const seedDatabase = async () => {
 
     // Create alerts
     for (const student of students) {
-      const alert = await queryOne(
+      await queryOne(
         `INSERT INTO alerts (professor_id, student_id, title, description, severity, is_read)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
