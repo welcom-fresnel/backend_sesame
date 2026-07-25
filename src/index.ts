@@ -11,6 +11,7 @@ import schoolRoutes from './routes/schools.js';
 import studentRoutes from './routes/students.js';
 import projectRoutes from './routes/projects.js';
 import alertRoutes from './routes/alerts.js';
+import adminRoutes from './routes/admin.js';
 import { setupSocketHandlers, SocketEmitter } from './socket/handlers.js';
 
 const app = express();
@@ -72,6 +73,7 @@ app.use('/api/schools', schoolRoutes);
 app.use('/api/students', authMiddleware, studentRoutes);
 app.use('/api/projects', authMiddleware, projectRoutes);
 app.use('/api/alerts', authMiddleware, alertRoutes);
+app.use('/api/admin', authMiddleware, adminRoutes);
 
 // WebSocket setup
 setupSocketHandlers(io);

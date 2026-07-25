@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from '../db/index.js';
+import { config } from '../config/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { hashPassword, comparePasswords } from '../utils/password.js';
 import { generateTokenPair } from '../utils/jwt.js';
@@ -197,7 +198,10 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    if (user.verified === false && user.role !== 'student') {
+    const requiresVerification = user.verified === false && user.role !== 'student';
+    const allowUnverifiedInDev = config.isDev && requiresVerification;
+
+    if (requiresVerification && !allowUnverifiedInDev) {
       res.status(401).json({
         success: false,
         error: 'Invalid credentials',

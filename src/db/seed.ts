@@ -20,26 +20,43 @@ const seedDatabase = async () => {
     const adminPassword = await bcryptjs.hash('admin123', 10);
 
     // Create professor user
-    const professor = await queryOne(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-       RETURNING id, email`,
-      ['prof.martin@university.fr', professorPassword, 'Martin', 'Dupont', 'professor']
+    let professor = await queryOne(
+      `SELECT id, email FROM users WHERE email = $1`,
+      ['prof.martin@university.fr']
     );
+
+    if (!professor) {
+      professor = await queryOne(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, verified)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, email`,
+        ['prof.martin@university.fr', professorPassword, 'Martin', 'Dupont', 'professor', true]
+      );
+    } else {
+      await queryOne(
+        `UPDATE users SET verified = true WHERE id = $1 RETURNING id`,
+        [professor.id]
+      );
+    }
 
     if (!professor) {
       throw new Error('Failed to create professor user');
     }
 
     // Create professor profile
-    const professorProfile = await queryOne(
-      `INSERT INTO professors (user_id, title, department, email)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (user_id) DO UPDATE SET title = EXCLUDED.title, department = EXCLUDED.department, email = EXCLUDED.email
-       RETURNING id, user_id`,
-      [professor.id, 'Professeur Agrégé', 'Informatique', 'prof.martin@university.fr']
+    let professorProfile = await queryOne(
+      `SELECT id, user_id FROM professors WHERE user_id = $1`,
+      [professor.id]
     );
+
+    if (!professorProfile) {
+      professorProfile = await queryOne(
+        `INSERT INTO professors (user_id, title, department, email)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, user_id`,
+        [professor.id, 'Professeur Agrégé', 'Informatique', 'prof.martin@university.fr']
+      );
+    }
 
     if (!professorProfile) {
       throw new Error('Failed to create professor profile');
@@ -50,31 +67,49 @@ const seedDatabase = async () => {
     // Create students
     const students = [];
     for (let i = 1; i <= 3; i++) {
-      const student = await queryOne(
-        `INSERT INTO users (email, password_hash, first_name, last_name, role)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-         RETURNING id, email`,
-        [
-          `student${i}@university.fr`,
-          studentPassword,
-          `Student`,
-          `${i}`,
-          'student'
-        ]
+      let student = await queryOne(
+        `SELECT id, email FROM users WHERE email = $1`,
+        [`student${i}@university.fr`]
       );
+
+      if (!student) {
+        student = await queryOne(
+          `INSERT INTO users (email, password_hash, first_name, last_name, role, verified)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, email`,
+          [
+            `student${i}@university.fr`,
+            studentPassword,
+            `Student`,
+            `${i}`,
+            'student',
+            true
+          ]
+        );
+      } else {
+        await queryOne(
+          `UPDATE users SET verified = true WHERE id = $1 RETURNING id`,
+          [student.id]
+        );
+      }
 
       if (!student) {
         throw new Error(`Failed to create student ${i}`);
       }
 
-      const studentProfile = await queryOne(
-        `INSERT INTO students (user_id, student_number, enrollment_year)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_id) DO UPDATE SET student_number = EXCLUDED.student_number, enrollment_year = EXCLUDED.enrollment_year
-         RETURNING id, user_id`,
-        [student.id, `STU${String(i).padStart(5, '0')}`, 2024]
+      let studentProfile = await queryOne(
+        `SELECT id, user_id FROM students WHERE user_id = $1`,
+        [student.id]
       );
+
+      if (!studentProfile) {
+        studentProfile = await queryOne(
+          `INSERT INTO students (user_id, student_number, enrollment_year)
+           VALUES ($1, $2, $3)
+           RETURNING id, user_id`,
+          [student.id, `STU${String(i).padStart(5, '0')}`, 2024]
+        );
+      }
 
       if (!studentProfile) {
         throw new Error(`Failed to create student profile for ${student.email}`);
@@ -89,13 +124,24 @@ const seedDatabase = async () => {
     }
 
     // Create admin user
-    const admin = await queryOne(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-       RETURNING id, email`,
-      ['admin@university.fr', adminPassword, 'Admin', 'System', 'admin']
+    let admin = await queryOne(
+      `SELECT id, email FROM users WHERE email = $1`,
+      ['admin@university.fr']
     );
+
+    if (!admin) {
+      admin = await queryOne(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, verified)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, email`,
+        ['admin@university.fr', adminPassword, 'Admin', 'System', 'admin', true]
+      );
+    } else {
+      await queryOne(
+        `UPDATE users SET verified = true WHERE id = $1 RETURNING id`,
+        [admin.id]
+      );
+    }
 
     if (!admin) {
       throw new Error('Failed to create admin user');
