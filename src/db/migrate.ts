@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(50) NOT NULL CHECK (role IN ('student', 'professor', 'admin')),
+  verified BOOLEAN DEFAULT FALSE,
   first_name VARCHAR(100) NOT NULL,
   last_name VARCHAR(100) NOT NULL,
   avatar_url TEXT,
@@ -158,7 +159,7 @@ ALTER TABLE students ADD CONSTRAINT students_professor_id_fkey
 
 export async function migrate(): Promise<void> {
   // Initialize pool first
-  initializePool();
+  await initializePool();
   
   const pool = getPool();
   const client = await pool.connect();

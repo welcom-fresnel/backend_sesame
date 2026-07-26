@@ -4,7 +4,7 @@ import bcryptjs from 'bcryptjs';
 const seedDatabase = async () => {
   try {
     // Initialize database connection first
-    initializePool();
+    await initializePool();
     
     // Test connection
     const connected = await testConnection();

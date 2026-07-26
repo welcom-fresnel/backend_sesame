@@ -3,7 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { config } from './config/index.js';
-import { initializePool, testConnection } from './db/index.js';
+import { initializePool, startDatabaseKeepAlive, testConnection } from './db/index.js';
 import { authMiddleware } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import authEncadreurRoutes from './routes/auth-encadreur.js';
@@ -106,13 +106,15 @@ export { io };
 async function startServer() {
   try {
     // Initialize database
-    initializePool();
+    await initializePool();
 
     // Test database connection
     const dbConnected = await testConnection();
     if (!dbConnected) {
       throw new Error('Database connection failed');
     }
+
+    startDatabaseKeepAlive();
 
     // Start HTTP server
     server.listen(config.port, () => {

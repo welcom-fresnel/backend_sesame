@@ -164,7 +164,7 @@ GROUP BY s.id, s.name;
 
 export async function migrateMultiTenant(): Promise<void> {
   try {
-    initializePool();
+    await initializePool();
     const pool = getPool();
     const client = await pool.connect();
 

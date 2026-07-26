@@ -1,20 +1,86 @@
-import { Pool, PoolClient, QueryResultRow } from 'pg';
+import dns from 'dns';
+import net from 'net';
+import { Pool, PoolClient, QueryResultRow, type PoolConfig } from 'pg';
 import { config } from '../config/index.js';
 
 let pool: Pool;
+let keepAliveTimer: NodeJS.Timeout | null = null;
 
-export function initializePool(): Pool {
+function isHostnameIp(hostname: string) {
+  return net.isIP(hostname) !== 0;
+}
+
+async function resolveDatabaseHost(hostname: string): Promise<string> {
+  if (isHostnameIp(hostname)) {
+    return hostname;
+  }
+
+  try {
+    const addresses = await dns.promises.resolve4(hostname);
+    if (addresses.length > 0) {
+      return addresses[0];
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err && err.code !== 'ENODATA' && err.code !== 'ENOTFOUND') {
+      console.warn(`IPv4 lookup failed for ${hostname}:`, err.message || err);
+    }
+  }
+
+  try {
+    const addresses6 = await dns.promises.resolve6(hostname);
+    if (addresses6.length > 0) {
+      return addresses6[0];
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err && err.code !== 'ENODATA' && err.code !== 'ENOTFOUND') {
+      console.warn(`IPv6 lookup failed for ${hostname}:`, err.message || err);
+    }
+  }
+
+  throw new Error(`Could not resolve host ${hostname} to an IPv4 or IPv6 address`);
+}
+
+export async function initializePool(): Promise<Pool> {
   const connStr = config.database.url || '';
   // Mask password when logging
   const masked = connStr.replace(/:(?:[^:@]+)@/, ':****@');
   console.log('Using DATABASE_URL:', masked);
 
-  pool = new Pool({
-    connectionString: connStr,
+  const url = new URL(connStr);
+  const resolvedHost = await resolveDatabaseHost(url.hostname);
+  if (resolvedHost !== url.hostname) {
+    console.log('Resolved DATABASE_URL host to address:', resolvedHost);
+  }
+
+  const poolConfig: PoolConfig = {
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    host: resolvedHost,
+    port: Number(url.port || 5432),
+    database: url.pathname?.slice(1),
     idleTimeoutMillis: 30000,
-    // Increase the connection timeout to allow for slower startups or transient network hiccups
     connectionTimeoutMillis: 10000,
-  });
+  };
+
+  const sslMode = url.searchParams.get('sslmode') || process.env.PGSSLMODE;
+  if (sslMode === 'require' || sslMode === 'verify-full' || sslMode === 'verify-ca') {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+
+  try {
+    pool = new Pool(poolConfig);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err && err.code === 'ENETUNREACH') {
+      throw new Error(
+        `Database host ${resolvedHost} is unreachable. This usually means your machine does not have IPv6 connectivity to reach Supabase. ` +
+          'Try a network with IPv6 support or use a Supabase endpoint with IPv4 access.'
+      );
+    }
+    throw error;
+  }
 
   pool.on('error', (err) => {
     console.error('Unexpected error on idle client', err);
@@ -31,8 +97,30 @@ export function getPool(): Pool {
 }
 
 export async function closePool(): Promise<void> {
+  stopDatabaseKeepAlive();
   if (pool) {
     await pool.end();
+  }
+}
+
+export function startDatabaseKeepAlive(intervalMs = Number(process.env.DB_KEEPALIVE_INTERVAL_MS ?? 1000)): void {
+  if (keepAliveTimer || !Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return;
+  }
+
+  keepAliveTimer = setInterval(async () => {
+    try {
+      await getPool().query('SELECT 1');
+    } catch (error) {
+      console.warn('Database keepalive ping failed:', error);
+    }
+  }, intervalMs);
+}
+
+export function stopDatabaseKeepAlive(): void {
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
   }
 }
 

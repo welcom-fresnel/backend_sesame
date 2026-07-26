@@ -4,7 +4,7 @@ import { pathToFileURL } from 'url';
 const seedSchools = async () => {
   try {
     // Initialize pool first
-    initializePool();
+    await initializePool();
     
     console.log('🔄 Seeding schools...');
 
