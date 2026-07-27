@@ -291,4 +291,53 @@ Si vous voulez la version la plus courte :
 
 ---
 
-Si vous voulez, je peux maintenant vous générer la version encore plus pratique sous forme de “checklist Render” que vous pouvez suivre case par case sans rien oublier.
+## 13) Garder Render éveillé (keep-alive)
+
+Sur le plan **Free**, un **Web Service** (backend) s’endort après **~15 minutes** sans trafic HTTP entrant. Au réveil, le premier appel peut prendre **30 à 50 secondes** (cold start) — ce n’est pas un timeout de 50 s, c’est le temps de redémarrage.
+
+Les **Static Sites** (frontends) ne s’endorment en général **pas** ; seul le backend a besoin d’un ping régulier.
+
+### Option A — GitHub Actions (recommandé)
+
+Le dépôt contient `.github/workflows/render-keepalive.yml` : un ping automatique **toutes les 10 minutes**.
+
+1. Poussez le code sur GitHub.
+2. Allez dans **Settings → Secrets and variables → Actions → New repository secret**.
+3. Créez le secret `RENDER_PING_URLS` avec vos URLs séparées par des virgules :
+
+```env
+RENDER_PING_URLS=https://sesame-backend-taoc.onrender.com/health,https://encadreur-connect.onrender.com,https://sesame-admin.onrender.com
+```
+
+4. Vérifiez dans l’onglet **Actions** que le workflow « Render Keep Alive » s’exécute bien.
+
+Vous pouvez aussi le lancer manuellement via **Run workflow**.
+
+### Option B — cron-job.org (sans GitHub Actions)
+
+1. Créez un compte sur https://cron-job.org
+2. Nouvelle tâche cron : toutes les **10 minutes**
+3. URL à appeler (plusieurs tâches ou une par service) :
+   - Backend : `https://<backend>.onrender.com/health`
+   - Frontends (optionnel) : `https://<encadreur>.onrender.com`
+
+### Option C — script local / serveur
+
+```bash
+export RENDER_PING_URLS="https://sesame-backend-taoc.onrender.com/health,https://encadreur-connect.onrender.com"
+./scripts/render-keepalive.sh
+```
+
+À planifier avec `crontab -e` (toutes les 10 min) :
+
+```cron
+*/10 * * * * RENDER_PING_URLS="https://sesame-backend-taoc.onrender.com/health,https://encadreur-connect.onrender.com" /chemin/vers/backend_sesame/scripts/render-keepalive.sh >> /tmp/render-keepalive.log 2>&1
+```
+
+### Important
+
+- Le ping doit venir **de l’extérieur** (GitHub, cron-job, etc.) : un service Render endormi ne peut pas se réveiller tout seul.
+- `DB_KEEPALIVE_INTERVAL_MS` sur le backend garde la **base PostgreSQL** active, pas le service Render lui-même.
+- Pour éviter complètement le cold start, passez au plan **Starter** sur Render.
+
+---

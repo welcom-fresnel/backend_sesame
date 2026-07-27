@@ -1,0 +1,39 @@
+name: Render Keep Alive
+
+on:
+  schedule:
+    # Render free tier spins down after ~15 min without traffic — ping every 10 min.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Render backend and frontends
+        env:
+          RENDER_PING_URLS: ${{ secrets.RENDER_PING_URLS }}
+        run: |
+          if [ -z "$RENDER_PING_URLS" ]; then
+            echo "Missing secret RENDER_PING_URLS."
+            echo "Add it in GitHub → Settings → Secrets → Actions."
+            exit 1
+          fi
+
+          IFS=',' read -ra TARGETS <<< "$RENDER_PING_URLS"
+          failed=0
+
+          for raw in "${TARGETS[@]}"; do
+            url="$(echo "$raw" | xargs)"
+            [ -z "$url" ] && continue
+            echo "Pinging $url ..."
+            if curl -fsS -o /dev/null -w "  HTTP %{http_code}\n" --max-time 45 "$url"; then
+              echo "  OK"
+            else
+              echo "  FAILED"
+              failed=1
+            fi
+          done
+
+          exit "$failed"
