@@ -5,7 +5,10 @@ dotenv.config();
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:8081',
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5175',
+  /** URL du frontend étudiant (project-companion) — liens d'invitation /join/:token */
+  studentFrontendUrl:
+    process.env.STUDENT_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5174',
   
   database: {
     url: process.env.DATABASE_URL,

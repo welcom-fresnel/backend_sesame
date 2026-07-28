@@ -202,7 +202,7 @@ router.post('/add', authenticateToken, requireRole(['encadreur', 'doc']), async 
     }
 
     // Générer le lien d'accès
-    const joinUrl = `${config.frontendUrl}/join/${joinToken}`;
+    const joinUrl = `${config.studentFrontendUrl}/join/${joinToken}`;
 
     // TODO: Envoyer email à l'étudiant avec le lien
     console.log(`📧 Student link sent to ${validatedData.email}: ${joinUrl}`);

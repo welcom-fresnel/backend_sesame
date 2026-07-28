@@ -13,7 +13,8 @@ Ce fichier liste **quoi configurer** après avoir hébergé le backend, et **quo
 - `CORS_ORIGIN=<liste d’origins autorisées, séparées par des virgules>`
   - Exemple :
     - `CORS_ORIGIN=https://admin.sessame.tld,https://encadreur.sessame.tld,https://etudiant.sessame.tld,http://localhost:5173,http://localhost:5174,http://localhost:5175`
-- `FRONTEND_URL=https://etudiant.sessame.tld` (utilisé pour construire certains liens d’invitation)
+- `FRONTEND_URL=https://encadreur.sessame.tld` (frontend encadreur, optionnel)
+- `STUDENT_FRONTEND_URL=https://etudiant.sessame.tld` (frontend étudiant — **liens d'invitation** `/join/:token`)
 
 Recommandé (si tu mets le backend derrière un proxy/https) :
 - Activer TLS/HTTPS sur le domaine API (ex: `https://api.sessame.tld`)

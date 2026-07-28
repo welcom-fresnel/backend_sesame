@@ -87,8 +87,9 @@ PORT=10000
 JWT_SECRET=change-this-to-a-long-random-string
 JWT_EXPIRES_IN=24h
 DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<database>
-FRONTEND_URL=https://<votre-front-encadreur>.onrender.com
-CORS_ORIGIN=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur>.onrender.com
+FRONTEND_URL=https://<encadreur-connect>.onrender.com
+STUDENT_FRONTEND_URL=https://<project-companion>.onrender.com
+CORS_ORIGIN=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur-connect>.onrender.com
 SOCKET_IO_CORS=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur>.onrender.com
 ```
 
@@ -222,6 +223,7 @@ Une fois que chaque service a une URL Render, il faut les utiliser dans les vari
 ### Backend final à utiliser
 ```env
 FRONTEND_URL=https://<encadreur-connect>.onrender.com
+STUDENT_FRONTEND_URL=https://<project-companion>.onrender.com
 CORS_ORIGIN=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur-connect>.onrender.com
 SOCKET_IO_CORS=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur-connect>.onrender.com
 ```
