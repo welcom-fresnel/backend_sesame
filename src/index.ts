@@ -58,8 +58,10 @@ if (config.isDev) {
     next();
   });
 }
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+const bodyLimit = Math.max(config.upload.maxFileSize, 10 * 1024 * 1024);
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {
@@ -84,6 +86,14 @@ export { socketEmitter };
 
 // Global error handler
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof Error && err.name === 'PayloadTooLargeError') {
+    res.status(413).json({
+      success: false,
+      error: 'Request body too large',
+    });
+    return;
+  }
+
   console.error('Unhandled error:', err);
   res.status(500).json({
     success: false,
