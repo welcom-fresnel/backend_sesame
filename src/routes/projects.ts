@@ -575,30 +575,33 @@ router.post(
 
       // If files are provided as base64 payloads, store them in files table and attach first file_url
       if (step && Array.isArray(files) && files.length > 0) {
-          step.file_url = fileUrl;
-        if (step && Array.isArray(files) && files.length > 0) {
-          const f = files[0];
-          if (f?.contentBase64 && f?.name) {
-            if (s3Client) {
-              const key = `projects/${projectId}/steps/${step.id}/${crypto.randomUUID()}_${f.name}`;
-              const cmd = new PutObjectCommand({ Bucket: config.upload.s3.bucket, Key: key, Body: Buffer.from(f.contentBase64, 'base64'), ContentType: f.mimeType || 'application/octet-stream' });
-              await s3Client.send(cmd);
-              const fileUrl = `https://${config.upload.s3.bucket}.s3.${config.upload.s3.region}.amazonaws.com/${key}`;
-              await query(`INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size) VALUES ($1,$2,$3,$4,$5,$6)`, [projectId, req.user?.id, f.name, fileUrl, f.mimeType || null, f.size || 0]);
-              await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
-              step.file_url = fileUrl;
-            } else {
-              const fileUrl = `data:${f.mimeType || 'application/octet-stream'};base64,${f.contentBase64}`;
-              await query(
-                `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
-                [projectId, req.user?.id, f.name, fileUrl, f.mimeType || 'application/octet-stream', f.size || 0]
-              );
-              await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
-              step.file_url = fileUrl;
-            }
+        const f = files[0];
+        if (f?.contentBase64 && f?.name) {
+          let fileUrl: string;
+          if (s3Client) {
+            const key = `projects/${projectId}/steps/${step.id}/${crypto.randomUUID()}_${f.name}`;
+            const cmd = new PutObjectCommand({
+              Bucket: config.upload.s3.bucket,
+              Key: key,
+              Body: Buffer.from(f.contentBase64, 'base64'),
+              ContentType: f.mimeType || 'application/octet-stream',
+            });
+            await s3Client.send(cmd);
+            fileUrl = `https://${config.upload.s3.bucket}.s3.${config.upload.s3.region}.amazonaws.com/${key}`;
+          } else {
+            fileUrl = `data:${f.mimeType || 'application/octet-stream'};base64,${f.contentBase64}`;
           }
+
+          await query(
+            `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [projectId, req.user?.id, f.name, fileUrl, f.mimeType || null, f.size || 0]
+          );
+          await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
+          step.file_url = fileUrl;
         }
+      }
+
       await recalculateProjectProgress(projectId);
 
       socketEmitter.notifyProject(projectId, 'project_step:created', step);
@@ -619,17 +622,25 @@ router.patch(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectId, stepId } = req.params;
-      const { title, description, due_date, weight, completed, file_url } = req.body as any;
+      const { title, description, due_date, weight, completed, file_url, files = [] } = req.body as any;
 
       const access = await getProjectAccess(req, projectId);
       if (!access || !access.authorized) {
         res.status(access ? 403 : 404).json({ success: false, error: access ? 'Forbidden' : 'Project not found' });
         return;
-        } else if (f?.url || f?.file_url || f?.publicUrl) {
-          const fileUrl = f.url || f.file_url || f.publicUrl;
-          await query(`INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size) VALUES ($1,$2,$3,$4,$5,$6)`, [projectId, req.user?.id, f.name || fileUrl.split('/').pop(), fileUrl, f.mimeType || null, f.size || 0]);
-          await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
-          step.file_url = fileUrl;
+      }
+
+      let finalFileUrl = file_url || null;
+      if (Array.isArray(files) && files.length > 0) {
+        const f = files[0];
+        const candidateUrl = f?.url || f?.file_url || f?.publicUrl;
+        if (candidateUrl) {
+          finalFileUrl = candidateUrl;
+          await query(
+            `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [projectId, req.user?.id, f.name || candidateUrl.split('/').pop(), candidateUrl, f.mimeType || null, f.size || 0]
+          );
         }
       }
 
@@ -644,7 +655,7 @@ router.patch(
            updated_at = CURRENT_TIMESTAMP
          WHERE id = $7 AND project_id = $8
          RETURNING *`,
-        [title || null, description || null, due_date || null, weight ?? null, typeof completed === 'boolean' ? completed : null, file_url || null, stepId, projectId]
+        [title || null, description || null, due_date || null, weight ?? null, typeof completed === 'boolean' ? completed : null, finalFileUrl || null, stepId, projectId]
       );
 
       if (!updated) {
