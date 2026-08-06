@@ -3,8 +3,62 @@ import { query, queryOne } from '../db/index.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import { socketEmitter } from '../index.js';
 import type { Project, JournalEntry, DefenseProposal, FileRecord } from '../types/index.js';
+import { config } from '../config/index.js';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import crypto from 'crypto';
+
+// Recalculate project progress based on project_steps weights
+async function recalculateProjectProgress(projectId: string) {
+  // Sum weights and sum completed weights
+  const totals = await query<{ total_weight: number | null; completed_weight: number | null }>(
+    `SELECT
+      SUM(weight) AS total_weight,
+      SUM(CASE WHEN completed THEN weight ELSE 0 END) AS completed_weight
+     FROM project_steps
+     WHERE project_id = $1`,
+    [projectId]
+  );
+
+  const totalWeight = totals[0]?.total_weight ?? 0;
+  const completedWeight = totals[0]?.completed_weight ?? 0;
+
+  let progress = 0;
+  if (Number(totalWeight) > 0) {
+    progress = Math.round((Number(completedWeight) / Number(totalWeight)) * 100);
+  } else {
+    // Fallback: if no weights defined, compute by completed count
+    const counts = await query<{ total_count: number; completed_count: number }>(
+      `SELECT COUNT(*)::int AS total_count, SUM(CASE WHEN completed THEN 1 ELSE 0 END)::int AS completed_count FROM project_steps WHERE project_id = $1`,
+      [projectId]
+    );
+    const totalCount = counts[0]?.total_count ?? 0;
+    const completedCount = counts[0]?.completed_count ?? 0;
+    progress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  }
+
+  // Update projects table
+  const updated = await queryOne<Project>(
+    `UPDATE projects SET progress_percentage = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+    [progress, projectId]
+  );
+
+  // Emit socket event for project progress update (if any)
+  try {
+    socketEmitter.notifyProject(projectId, 'project_steps_updated', { projectId, progress_percentage: progress });
+  } catch (e) {
+    console.warn('Socket emit failed for project_steps_updated', e);
+  }
+
+  return updated;
+}
 
 const router = Router();
+
+let s3Client: S3Client | null = null;
+if (config.upload.s3 && config.upload.s3.bucket) {
+  s3Client = new S3Client({ region: config.upload.s3.region, credentials: { accessKeyId: config.upload.s3.accessKeyId, secretAccessKey: config.upload.s3.secretAccessKey } });
+}
 
 type FilePayload = {
   name: string;
@@ -70,6 +124,35 @@ router.get(
         success: false,
         error: 'Internal server error',
       });
+    }
+  }
+);
+
+// Generate a signed upload URL for S3 (frontend will PUT the file directly)
+router.post(
+  '/uploads/sign',
+  authMiddleware,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!s3Client) {
+        res.status(400).json({ success: false, error: 'S3 not configured' });
+        return;
+      }
+
+      const { fileName, contentType, projectId } = req.body as { fileName: string; contentType: string; projectId?: string };
+      if (!fileName || !contentType) {
+        res.status(400).json({ success: false, error: 'fileName and contentType are required' });
+        return;
+      }
+
+      const key = `uploads/${projectId ?? 'general'}/${crypto.randomUUID()}_${fileName}`;
+      const cmd = new PutObjectCommand({ Bucket: config.upload.s3.bucket, Key: key, ContentType: contentType });
+      const url = await getSignedUrl(s3Client!, cmd, { expiresIn: 60 });
+
+      res.json({ success: true, data: { url, key, publicUrl: `https://${config.upload.s3.bucket}.s3.${config.upload.s3.region}.amazonaws.com/${key}` } });
+    } catch (error) {
+      console.error('Generate signed URL error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
     }
   }
 );
@@ -434,6 +517,154 @@ router.post(
   }
 );
 
+// Get steps for a project
+router.get(
+  '/:projectId/steps',
+  authMiddleware,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { projectId } = req.params;
+      const access = await getProjectAccess(req, projectId);
+      if (!access || !access.authorized) {
+        res.status(access ? 403 : 404).json({ success: false, error: access ? 'Forbidden' : 'Project not found' });
+        return;
+      }
+
+      const steps = await query(
+        'SELECT * FROM project_steps WHERE project_id = $1 ORDER BY created_at ASC',
+        [projectId]
+      );
+
+      res.json({ success: true, data: steps });
+    } catch (error) {
+      console.error('Get project steps error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  }
+);
+
+// Create a step (encadreur / professor / admin)
+router.post(
+  '/:projectId/steps',
+  authMiddleware,
+  requireRole('encadreur', 'professor', 'admin'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { projectId } = req.params;
+      const { title, description, due_date, weight, files = [] } = req.body as any;
+
+      const access = await getProjectAccess(req, projectId);
+      if (!access || !access.authorized) {
+        res.status(access ? 403 : 404).json({ success: false, error: access ? 'Forbidden' : 'Project not found' });
+        return;
+      }
+
+      if (!title) {
+        res.status(400).json({ success: false, error: 'Title is required' });
+        return;
+      }
+
+      const supervisorId = req.user?.id || null;
+      const providedFileUrl = (req.body && (req.body.file_url || req.body.fileUrl || req.body.publicUrl)) ?? null;
+      const step = await queryOne(
+        `INSERT INTO project_steps (project_id, supervisor_id, title, description, due_date, weight, file_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [projectId, supervisorId, title, description || null, due_date || null, weight || 0, providedFileUrl]
+      );
+
+      // If files are provided as base64 payloads, store them in files table and attach first file_url
+      if (step && Array.isArray(files) && files.length > 0) {
+          step.file_url = fileUrl;
+        if (step && Array.isArray(files) && files.length > 0) {
+          const f = files[0];
+          if (f?.contentBase64 && f?.name) {
+            if (s3Client) {
+              const key = `projects/${projectId}/steps/${step.id}/${crypto.randomUUID()}_${f.name}`;
+              const cmd = new PutObjectCommand({ Bucket: config.upload.s3.bucket, Key: key, Body: Buffer.from(f.contentBase64, 'base64'), ContentType: f.mimeType || 'application/octet-stream' });
+              await s3Client.send(cmd);
+              const fileUrl = `https://${config.upload.s3.bucket}.s3.${config.upload.s3.region}.amazonaws.com/${key}`;
+              await query(`INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size) VALUES ($1,$2,$3,$4,$5,$6)`, [projectId, req.user?.id, f.name, fileUrl, f.mimeType || null, f.size || 0]);
+              await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
+              step.file_url = fileUrl;
+            } else {
+              const fileUrl = `data:${f.mimeType || 'application/octet-stream'};base64,${f.contentBase64}`;
+              await query(
+                `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [projectId, req.user?.id, f.name, fileUrl, f.mimeType || 'application/octet-stream', f.size || 0]
+              );
+              await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
+              step.file_url = fileUrl;
+            }
+          }
+        }
+      await recalculateProjectProgress(projectId);
+
+      socketEmitter.notifyProject(projectId, 'project_step:created', step);
+
+      res.status(201).json({ success: true, data: step });
+    } catch (error) {
+      console.error('Create project step error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  }
+);
+
+// Update a step (toggle completed, edit fields)
+router.patch(
+  '/:projectId/steps/:stepId',
+  authMiddleware,
+  requireRole('encadreur', 'professor', 'admin'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { projectId, stepId } = req.params;
+      const { title, description, due_date, weight, completed, file_url } = req.body as any;
+
+      const access = await getProjectAccess(req, projectId);
+      if (!access || !access.authorized) {
+        res.status(access ? 403 : 404).json({ success: false, error: access ? 'Forbidden' : 'Project not found' });
+        return;
+        } else if (f?.url || f?.file_url || f?.publicUrl) {
+          const fileUrl = f.url || f.file_url || f.publicUrl;
+          await query(`INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size) VALUES ($1,$2,$3,$4,$5,$6)`, [projectId, req.user?.id, f.name || fileUrl.split('/').pop(), fileUrl, f.mimeType || null, f.size || 0]);
+          await query(`UPDATE project_steps SET file_url = $1 WHERE id = $2`, [fileUrl, step.id]);
+          step.file_url = fileUrl;
+        }
+      }
+
+      const updated = await queryOne(
+        `UPDATE project_steps SET
+           title = COALESCE($1, title),
+           description = COALESCE($2, description),
+           due_date = COALESCE($3, due_date),
+           weight = COALESCE($4, weight),
+           completed = COALESCE($5, completed),
+           file_url = COALESCE($6, file_url),
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7 AND project_id = $8
+         RETURNING *`,
+        [title || null, description || null, due_date || null, weight ?? null, typeof completed === 'boolean' ? completed : null, file_url || null, stepId, projectId]
+      );
+
+      if (!updated) {
+        res.status(404).json({ success: false, error: 'Step not found' });
+        return;
+      }
+
+      // Recalculate project progress if completed changed or weight changed
+      await recalculateProjectProgress(projectId);
+
+      socketEmitter.notifyProject(projectId, 'project_step:updated', updated);
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      console.error('Update project step error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  }
+);
+
 // Get journal entries for project
 router.get(
   '/:projectId/journal',
@@ -478,7 +709,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectId } = req.params;
-      const { content, entry_date, sentiment } = req.body;
+      const { content, entry_date, sentiment, completed_step_ids = [], files = [] } = req.body;
 
       const access = await getProjectAccess(req, projectId);
       if (!access || !access.authorized) {
@@ -496,12 +727,59 @@ router.post(
         [projectId, content, entry_date, sentiment || 'neutral']
       );
 
-      socketEmitter.notifyProject(projectId, 'journal:submitted', entry);
+      if (entry) {
+        // Attach files sent as base64 payloads to files table
+        if (Array.isArray(files) && files.length > 0) {
+          for (const f of files) {
+            if (!f) continue;
+            if (f?.contentBase64 && f?.name) {
+              const fileUrl = `data:${f.mimeType || 'application/octet-stream'};base64,${f.contentBase64}`;
+              await query(
+                `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [projectId, req.user?.id, f.name, fileUrl, f.mimeType || null, f.size || 0]
+              );
+            } else if (f?.url || f?.file_url || f?.publicUrl) {
+              const fileUrl = f.url || f.file_url || f.publicUrl;
+              await query(
+                `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [projectId, req.user?.id, f.name || fileUrl.split('/').pop(), fileUrl, f.mimeType || null, f.size || 0]
+              );
+            }
+          }
+        }
 
-      res.status(201).json({
-        success: true,
-        data: entry,
-      });
+        // If the student marked steps as completed in this journal entry
+        if (Array.isArray(completed_step_ids) && completed_step_ids.length > 0) {
+          const stepIds = completed_step_ids.filter(Boolean);
+
+          for (const stepId of stepIds) {
+            // Insert completion link
+            try {
+              await query(
+                `INSERT INTO journal_step_completions (journal_id, step_id) VALUES ($1, $2)`,
+                [entry.id, stepId]
+              );
+            } catch (e) {
+              // ignore duplicate/constraint errors
+            }
+          }
+
+          // Mark steps completed
+          await query(
+            `UPDATE project_steps SET completed = true, updated_at = CURRENT_TIMESTAMP WHERE id = ANY($1::uuid[])`,
+            [stepIds]
+          );
+
+          // Recalculate project progress
+          await recalculateProjectProgress(projectId);
+        }
+
+        socketEmitter.notifyProject(projectId, 'journal:submitted', entry);
+      }
+
+      res.status(201).json({ success: true, data: entry });
     } catch (error) {
       console.error('Create journal entry error:', error);
       res.status(500).json({

@@ -151,6 +151,33 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id);
 CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
 
+-- Project steps table: tasks defined by supervisors/encadreurs
+CREATE TABLE IF NOT EXISTS project_steps (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  supervisor_id UUID REFERENCES professors(id) ON DELETE SET NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  due_date DATE,
+  file_url TEXT,
+  weight INTEGER DEFAULT 0,
+  completed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Link table between journal entries and steps completed in that entry
+CREATE TABLE IF NOT EXISTS journal_step_completions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  journal_id UUID NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+  step_id UUID NOT NULL REFERENCES project_steps(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_steps_project_id ON project_steps(project_id);
+CREATE INDEX IF NOT EXISTS idx_journal_step_completions_journal_id ON journal_step_completions(journal_id);
+CREATE INDEX IF NOT EXISTS idx_journal_step_completions_step_id ON journal_step_completions(step_id);
+
 -- Foreign key constraint for students.professor_id needs professors to exist first
 ALTER TABLE students DROP CONSTRAINT IF EXISTS students_professor_id_fkey;
 ALTER TABLE students ADD CONSTRAINT students_professor_id_fkey 

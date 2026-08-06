@@ -54,6 +54,22 @@ export async function initializePool(): Promise<Pool> {
     console.log('Resolved DATABASE_URL host to address:', resolvedHost);
   }
 
+  // Try to prefer an IPv4 address when possible (some networks don't have IPv6 connectivity)
+  try {
+    const lookup4 = await dns.promises.lookup(url.hostname, { family: 4 });
+    if (lookup4 && lookup4.address) {
+      if (lookup4.address !== resolvedHost) {
+        console.log('Found IPv4 address for host, using it instead of resolved host:', lookup4.address);
+      }
+      // Use the IPv4 address
+      // eslint-disable-next-line prefer-const
+      (resolvedHost as string) = lookup4.address;
+    }
+  } catch (err) {
+    // If lookup fails, keep the previously resolved host (might be IPv6)
+    // This is not fatal; we'll attempt connection and let the pool raise errors if unreachable.
+  }
+
   const poolConfig: PoolConfig = {
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),

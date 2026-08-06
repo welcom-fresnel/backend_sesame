@@ -32,6 +32,12 @@ export const config = {
   upload: {
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10),
     uploadDir: process.env.UPLOAD_DIR || './uploads',
+    s3: {
+      bucket: process.env.S3_BUCKET || '',
+      region: process.env.S3_REGION || '',
+      accessKeyId: process.env.S3_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+    },
   },
   
   isDev: process.env.NODE_ENV === 'development',
