@@ -49,7 +49,7 @@ export async function initializePool(): Promise<Pool> {
   console.log('Using DATABASE_URL:', masked);
 
   const url = new URL(connStr);
-  const resolvedHost = await resolveDatabaseHost(url.hostname);
+  let resolvedHost = await resolveDatabaseHost(url.hostname);
   if (resolvedHost !== url.hostname) {
     console.log('Resolved DATABASE_URL host to address:', resolvedHost);
   }
