@@ -191,9 +191,10 @@ router.post(
         return;
       }
 
-      const { fileName, contentType, projectId } = req.body as { fileName: string; contentType: string; projectId?: string };
-      if (!fileName || !contentType) {
-        res.status(400).json({ success: false, error: 'fileName and contentType are required' });
+      const { fileName, contentType: rawContentType, projectId } = req.body as { fileName: string; contentType?: string; projectId?: string };
+      const contentType = rawContentType || 'application/octet-stream';
+      if (!fileName) {
+        res.status(400).json({ success: false, error: 'fileName is required' });
         return;
       }
 
