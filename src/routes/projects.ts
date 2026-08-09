@@ -60,6 +60,58 @@ if (config.upload.s3 && config.upload.s3.bucket) {
   s3Client = new S3Client({ region: config.upload.s3.region, credentials: { accessKeyId: config.upload.s3.accessKeyId, secretAccessKey: config.upload.s3.secretAccessKey } });
 }
 
+let cachedSupervisorFkTarget: 'users' | 'professors' | null = null;
+
+async function getSupervisorFkTarget(): Promise<'users' | 'professors' | null> {
+  if (cachedSupervisorFkTarget) return cachedSupervisorFkTarget;
+
+  const result = await queryOne<{
+    foreign_table_name: string;
+  }>(
+    `SELECT ccu.table_name AS foreign_table_name
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+     JOIN information_schema.constraint_column_usage ccu
+       ON ccu.constraint_name = tc.constraint_name
+      AND ccu.table_schema = tc.table_schema
+     WHERE tc.constraint_type = 'FOREIGN KEY'
+       AND tc.table_name = 'project_steps'
+       AND kcu.column_name = 'supervisor_id'
+     LIMIT 1`
+  );
+
+  const normalized = result?.foreign_table_name;
+  if (normalized === 'users' || normalized === 'professors') {
+    cachedSupervisorFkTarget = normalized;
+  } else {
+    cachedSupervisorFkTarget = 'users';
+  }
+
+  return cachedSupervisorFkTarget;
+}
+
+async function resolveSupervisorId(user: any): Promise<string | null> {
+  if (!user) {
+    return null;
+  }
+
+  const fkTarget = await getSupervisorFkTarget();
+  if (fkTarget === 'professors') {
+    if (user.role === 'professor') {
+      const professor = await queryOne<{ id: string }>(
+        'SELECT id FROM professors WHERE user_id = $1',
+        [user.id]
+      );
+      return professor?.id ?? null;
+    }
+    return null;
+  }
+
+  return user.id || null;
+}
+
 type FilePayload = {
   name: string;
   mimeType: string;
@@ -564,7 +616,7 @@ router.post(
         return;
       }
 
-      const supervisorId = req.user?.id || null;
+      const supervisorId = await resolveSupervisorId(req.user);
       const providedFileUrl = (req.body && (req.body.file_url || req.body.fileUrl || req.body.publicUrl)) ?? null;
       const step = await queryOne(
         `INSERT INTO project_steps (project_id, supervisor_id, title, description, due_date, weight, file_url)

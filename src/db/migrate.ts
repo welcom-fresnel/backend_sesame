@@ -155,7 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
 CREATE TABLE IF NOT EXISTS project_steps (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  supervisor_id UUID REFERENCES professors(id) ON DELETE SET NULL,
+  supervisor_id UUID REFERENCES users(id) ON DELETE SET NULL,
   title VARCHAR(255) NOT NULL,
   description TEXT,
   due_date DATE,
