@@ -6,6 +6,10 @@ import type { Project, JournalEntry, DefenseProposal, FileRecord } from '../type
 import { config } from '../config/index.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 // Recalculate project progress based on project_steps weights
@@ -58,6 +62,87 @@ const router = Router();
 let s3Client: S3Client | null = null;
 if (config.upload.s3 && config.upload.s3.bucket) {
   s3Client = new S3Client({ region: config.upload.s3.region, credentials: { accessKeyId: config.upload.s3.accessKeyId, secretAccessKey: config.upload.s3.secretAccessKey } });
+}
+
+// Upload backend selection: 'local' or 'supabase'
+const uploadBackend = (config.upload as any)?.backend || process.env.UPLOAD_BACKEND || 'local';
+
+// Multer setup
+const MAX_FILE_SIZE = Number(config.upload.maxFileSize || 50 * 1024 * 1024); // default 50MB
+const allowedMimeTypes: string[] = ((config.upload as any).allowedMimeTypes as string[]) || [];
+
+function isMimeAllowed(mime: string) {
+  if (!allowedMimeTypes || allowedMimeTypes.length === 0) return true;
+  for (const allowed of allowedMimeTypes) {
+    if (allowed.endsWith('/*')) {
+      const prefix = allowed.split('/')[0];
+      if (mime.startsWith(prefix + '/')) return true;
+    } else if (mime === allowed) return true;
+  }
+  return false;
+}
+
+let multerStorage: multer.StorageEngine;
+if (uploadBackend === 'supabase') {
+  multerStorage = multer.memoryStorage();
+} else {
+  const uploadDir = path.join(process.cwd(), config.upload.uploadDir || 'uploads');
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  multerStorage = multer.diskStorage({ destination: uploadDir, filename: (_req, file, cb) => cb(null, `${Date.now()}_${file.originalname}`) });
+}
+
+const upload = multer({
+  storage: multerStorage,
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (!isMimeAllowed(file.mimetype)) {
+      // TypeScript multer types are strict about the callback signature; cast to any to pass error
+      return cb(new Error('Invalid file type') as any, false);
+    }
+    cb(null, true);
+  },
+});
+
+// Supabase client (server-side) if configured
+let supabase: ReturnType<typeof createSupabaseClient> | null = null;
+if ((process.env.SUPABASE_URL || (config.upload as any)?.supabaseUrl) && (process.env.SUPABASE_SERVICE_KEY || (config.upload as any)?.supabaseServiceKey)) {
+  supabase = createSupabaseClient(process.env.SUPABASE_URL || (config.upload as any).supabaseUrl, process.env.SUPABASE_SERVICE_KEY || (config.upload as any).supabaseServiceKey);
+}
+
+async function uploadFileToStorage(file: Express.Multer.File): Promise<string> {
+  if (uploadBackend === 'supabase' && supabase) {
+    const bucket = process.env.SUPABASE_BUCKET || (config.upload as any).supabaseBucket || 'uploads';
+    const key = `projects/${file.fieldname}/${Date.now()}_${file.originalname}`;
+    const buffer = file.buffer as Buffer;
+    const { error } = await supabase.storage.from(bucket).upload(key, buffer, { contentType: file.mimetype, upsert: false });
+    if (error) throw error;
+    const publicUrl = supabase.storage.from(bucket).getPublicUrl(key).data.publicUrl;
+    return publicUrl;
+  }
+
+  // local storage
+  const uploadDir = path.join(process.cwd(), config.upload.uploadDir || 'uploads');
+  const filename = (file as any).filename || `${Date.now()}_${file.originalname}`;
+  const filePath = path.join(uploadDir, filename);
+  // Additional server-side validation
+  if (file.size && Number(file.size) > Number(config.upload.maxFileSize)) {
+    throw new Error('File exceeds maximum allowed size');
+  }
+  if (file.mimetype && !isMimeAllowed(file.mimetype)) {
+    throw new Error('Invalid file MIME type');
+  }
+  // if file was stored in diskStorage multer already saved it; if memoryStorage, write buffer
+  if ((file as any).path && fs.existsSync((file as any).path)) {
+    // already saved on disk
+    return `${config.frontendUrl.replace(/\//g, '')}/uploads/${filename}`;
+  }
+
+  if (file.buffer) {
+    fs.writeFileSync(filePath, file.buffer);
+    return `${config.frontendUrl.replace(/\//g, '')}/uploads/${filename}`;
+  }
+
+  throw new Error('Unable to store file');
 }
 
 let cachedSupervisorFkTarget: 'users' | 'professors' | null = null;
@@ -601,6 +686,7 @@ router.post(
   '/:projectId/steps',
   authMiddleware,
   requireRole('encadreur', 'professor', 'admin'),
+  upload.single('file'),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectId } = req.params;
@@ -618,12 +704,24 @@ router.post(
       }
 
       const supervisorId = await resolveSupervisorId(req.user);
+      // Accept file via multipart/form-data (req.file) or legacy file_url in JSON body
       const providedFileUrl = (req.body && (req.body.file_url || req.body.fileUrl || req.body.publicUrl)) ?? null;
+      let finalFileUrl = providedFileUrl;
+      const maybeFile = (req as any).file as Express.Multer.File | undefined;
+      if (maybeFile) {
+        try {
+          finalFileUrl = await uploadFileToStorage(maybeFile);
+        } catch (e) {
+          console.error('File upload error:', e);
+          res.status(500).json({ success: false, error: 'File upload failed' });
+          return;
+        }
+      }
       const step = await queryOne(
         `INSERT INTO project_steps (project_id, supervisor_id, title, description, due_date, weight, file_url)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [projectId, supervisorId, title, description || null, due_date || null, weight || 0, providedFileUrl]
+        [projectId, supervisorId, title, description || null, due_date || null, weight || 0, finalFileUrl]
       );
 
       // If files are provided as base64 payloads, store them in files table and attach first file_url
@@ -770,10 +868,19 @@ router.post(
   '/:projectId/journal',
   authMiddleware,
   requireRole('student'),
+  upload.array('files'),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectId } = req.params;
-      const { content, entry_date, sentiment, completed_step_ids = [], files = [] } = req.body;
+      let { content, entry_date, sentiment, completed_step_ids = [], files = [] } = req.body as any;
+      // Normalize completed_step_ids when sent as JSON string or comma-separated list
+      if (typeof completed_step_ids === 'string') {
+        try {
+          completed_step_ids = JSON.parse(completed_step_ids);
+        } catch {
+          completed_step_ids = completed_step_ids.length ? completed_step_ids.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+        }
+      }
 
       const access = await getProjectAccess(req, projectId);
       if (!access || !access.authorized) {
@@ -792,7 +899,23 @@ router.post(
       );
 
       if (entry) {
-        // Attach files sent as base64 payloads to files table
+        // Attach files sent via multipart/form-data (multer) or as base64 URLs in JSON
+        const uploadedFiles = (req as any).files as Express.Multer.File[] | undefined;
+        if (Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
+          for (const f of uploadedFiles) {
+            try {
+              const publicUrl = await uploadFileToStorage(f);
+              await query(
+                `INSERT INTO files (project_id, user_id, file_name, file_url, mime_type, file_size)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [projectId, req.user?.id, f.originalname, publicUrl, f.mimetype || null, f.size || 0]
+              );
+            } catch (e) {
+              console.error('Journal file upload failed:', e);
+            }
+          }
+        }
+
         if (Array.isArray(files) && files.length > 0) {
           for (const f of files) {
             if (!f) continue;

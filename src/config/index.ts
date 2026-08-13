@@ -32,6 +32,12 @@ export const config = {
   upload: {
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10),
     uploadDir: process.env.UPLOAD_DIR || './uploads',
+    backend: process.env.UPLOAD_BACKEND || 'local',
+    supabaseUrl: process.env.SUPABASE_URL || '',
+    supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || '',
+    supabaseBucket: process.env.SUPABASE_BUCKET || process.env.S3_BUCKET || 'uploads',
+    // Optional: comma-separated list of allowed MIME types (supports type/*), e.g. "application/pdf,image/*"
+    allowedMimeTypes: (process.env.ALLOWED_MIME_TYPES || 'application/pdf,image/*,text/plain,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,video/*').split(','),
     s3: {
       bucket: process.env.S3_BUCKET || '',
       region: process.env.S3_REGION || '',

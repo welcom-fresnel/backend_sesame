@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import path from 'path';
 import cors from 'cors';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -76,6 +77,12 @@ app.use('/api/students', authMiddleware, studentRoutes);
 app.use('/api/projects', authMiddleware, projectRoutes);
 app.use('/api/alerts', authMiddleware, alertRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
+
+// Serve uploaded files statically in development or when using local upload backend
+if (config.isDev || (config.upload && (config.upload as any).backend === 'local')) {
+  const uploadsDir = path.join(process.cwd(), config.upload.uploadDir || 'uploads');
+  app.use('/uploads', express.static(uploadsDir));
+}
 
 // WebSocket setup
 setupSocketHandlers(io);
