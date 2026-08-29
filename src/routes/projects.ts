@@ -265,33 +265,15 @@ router.get(
   }
 );
 
-// Generate a signed upload URL for S3 (frontend will PUT the file directly)
+// Legacy endpoint kept for compatibility: the app now uploads files directly as multipart/form-data.
 router.post(
   '/uploads/sign',
   authMiddleware,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      if (!s3Client) {
-        res.status(400).json({ success: false, error: 'S3 not configured' });
-        return;
-      }
-
-      const { fileName, contentType: rawContentType, projectId } = req.body as { fileName: string; contentType?: string; projectId?: string };
-      const contentType = rawContentType || 'application/octet-stream';
-      if (!fileName) {
-        res.status(400).json({ success: false, error: 'fileName is required' });
-        return;
-      }
-
-      const key = `uploads/${projectId ?? 'general'}/${crypto.randomUUID()}_${fileName}`;
-      const cmd = new PutObjectCommand({ Bucket: config.upload.s3.bucket, Key: key, ContentType: contentType });
-      const url = await getSignedUrl(s3Client!, cmd, { expiresIn: 60 });
-
-      res.json({ success: true, data: { url, key, publicUrl: `https://${config.upload.s3.bucket}.s3.${config.upload.s3.region}.amazonaws.com/${key}` } });
-    } catch (error) {
-      console.error('Generate signed URL error:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
+  async (_req: Request, res: Response): Promise<void> => {
+    res.status(400).json({
+      success: false,
+      error: 'Legacy signed-upload flow is disabled. Upload directly via multipart/form-data to POST /api/projects/:projectId/steps or /api/projects/:projectId/journal.',
+    });
   }
 );
 
