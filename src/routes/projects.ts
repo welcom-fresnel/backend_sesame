@@ -5,7 +5,6 @@ import { socketEmitter } from '../index.js';
 import type { Project, JournalEntry, DefenseProposal, FileRecord } from '../types/index.js';
 import { config } from '../config/index.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';

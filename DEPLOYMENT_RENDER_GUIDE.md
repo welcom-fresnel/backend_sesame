@@ -167,15 +167,45 @@ Cliquez sur Create Static Site.
 
 ---
 
-## 6) Déployer le frontend companion
+## 6) Déployer le frontend companion (project-companion)
 
-Même procédure que l’admin, mais avec le dossier :
-- Root Directory : project-companion
+**Important :** project-companion utilise **TanStack Start** (SSR + routes `/join/:token`).  
+Ne pas le déployer en `npm run dev` — cela charge Vite en mode développement et fixe `VITE_API_URL` sur `http://localhost:3000`.
 
-### Variables d’environnement
+### Étape 6.1 — Web Service (recommandé)
+
+1. Render → **New +** → **Web Service**
+2. Root Directory : `project-companion`
+3. Build Command :
+
+```bash
+npm install && npm run build
+```
+
+4. Start Command :
+
+```bash
+npm run start
+```
+
+5. Variables d’environnement **avant le build** :
+
 ```env
 VITE_API_URL=https://<votre-backend>.onrender.com
+NODE_ENV=production
 ```
+
+6. **Manual Deploy** après toute modification de `VITE_API_URL` (la variable est injectée au build, pas au runtime).
+
+### Vérifier que le déploiement est correct
+
+Ouvrez dans le navigateur (DevTools → Network) une page du site.  
+**Mauvais signes :**
+- requêtes vers `/node_modules/.vite/deps/...`
+- WebSocket `vite-hmr`
+- appels API vers `http://localhost:3000`
+
+**Bon signe :** appels API vers `https://<votre-backend>.onrender.com/api/...`
 
 ---
 
@@ -228,6 +258,14 @@ CORS_ORIGIN=https://<admin>.onrender.com,https://<companion>.onrender.com,https:
 SOCKET_IO_CORS=https://<admin>.onrender.com,https://<companion>.onrender.com,https://<encadreur-connect>.onrender.com
 ```
 
+Exemple concret :
+
+```env
+FRONTEND_URL=https://encadreur-connect.onrender.com
+STUDENT_FRONTEND_URL=https://project-companion-bhl0.onrender.com
+CORS_ORIGIN=https://sesame-admin.onrender.com,https://project-companion-bhl0.onrender.com,https://encadreur-connect.onrender.com
+```
+
 ### Frontends
 ```env
 VITE_API_URL=https://<backend>.onrender.com
@@ -249,6 +287,22 @@ VITE_API_URL=https://<backend>.onrender.com
 - créer un professeur depuis l’admin
 - ouvrir le lien généré
 - vérifier que la page d’inscription s’affiche
+
+### Vérifier l’invitation étudiant (`/join/:token`)
+1. Backend — le token doit répondre :
+
+```text
+GET https://<backend>.onrender.com/api/auth/encadreur/join/<token>
+→ {"success":true,"data":{"valid":true,...}}
+```
+
+2. Lien généré par l’encadreur — doit pointer vers **project-companion**, pas encadreur-connect :
+
+```text
+https://project-companion-bhl0.onrender.com/join/<token>
+```
+
+3. Page join — l’appel API doit aller vers le **backend Render**, jamais `localhost:3000`.
 
 ---
 
@@ -289,7 +343,10 @@ Si vous voulez la version la plus courte :
 - Oublier de mettre VITE_API_URL sur les frontends.
 - Oublier CORS_ORIGIN pour les domaines publics.
 - Oublier public/_redirects pour les routes internes.
-- Oublier d’exécuter npm run db:migrate et npm run db:seed.
+- Oublier d’exécuter npm run db:migrate, db:migrate:multitenant et db:seed.
+- Déployer project-companion avec `npm run dev` au lieu de `npm run build` + `npm run start`.
+- Oublier `STUDENT_FRONTEND_URL` sur le backend (liens d’invitation étudiant incorrects).
+- Oublier de redéployer project-companion après avoir changé `VITE_API_URL`.
 
 ---
 
